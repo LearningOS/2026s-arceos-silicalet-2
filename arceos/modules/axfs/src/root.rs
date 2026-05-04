@@ -70,34 +70,40 @@ impl RootDirectory {
         self.mounts.iter().any(|mp| mp.path == path)
     }
 
-    fn lookup_mounted_fs<F, T>(&self, path: &str, f: F) -> AxResult<T>
-    where
-        F: FnOnce(Arc<dyn VfsOps>, &str) -> AxResult<T>,
-    {
-        debug!("lookup at root: {}", path);
+    fn mounted_fs_for_path<'a>(&self, path: &'a str) -> (Arc<dyn VfsOps>, &'a str) {
         let path = path.trim_matches('/');
-        if let Some(rest) = path.strip_prefix("./") {
-            return self.lookup_mounted_fs(rest, f);
-        }
+        let path = path.strip_prefix("./").unwrap_or(path);
 
         let mut idx = 0;
         let mut max_len = 0;
 
-        // Find the filesystem that has the longest mounted path match
-        // TODO: more efficient, e.g. trie
         for (i, mp) in self.mounts.iter().enumerate() {
-            // skip the first '/'
-            if path.starts_with(&mp.path[1..]) && mp.path.len() - 1 > max_len {
-                max_len = mp.path.len() - 1;
+            let mount_path = &mp.path[1..];
+            if (path == mount_path
+                || path
+                    .strip_prefix(mount_path)
+                    .is_some_and(|rest| rest.starts_with('/')))
+                && mount_path.len() > max_len
+            {
+                max_len = mount_path.len();
                 idx = i;
             }
         }
 
         if max_len == 0 {
-            f(self.main_fs.clone(), path) // not matched any mount point
+            (self.main_fs.clone(), path)
         } else {
-            f(self.mounts[idx].fs.clone(), &path[max_len..]) // matched at `idx`
+            (self.mounts[idx].fs.clone(), &path[max_len..])
         }
+    }
+
+    fn lookup_mounted_fs<F, T>(&self, path: &str, f: F) -> AxResult<T>
+    where
+        F: FnOnce(Arc<dyn VfsOps>, &str) -> AxResult<T>,
+    {
+        debug!("lookup at root: {}", path);
+        let (fs, rest_path) = self.mounted_fs_for_path(path);
+        f(fs, rest_path)
     }
 }
 
@@ -302,9 +308,27 @@ pub(crate) fn set_current_dir(path: &str) -> AxResult {
 }
 
 pub(crate) fn rename(old: &str, new: &str) -> AxResult {
-    if parent_node_of(None, new).lookup(new).is_ok() {
-        warn!("dst file already exist, now remove it");
-        remove_file(None, new)?;
+    let old_abs = absolute_path(old)?;
+    let new_abs = absolute_path(new)?;
+
+    let (src_fs, src_rel) = ROOT_DIR.mounted_fs_for_path(&old_abs);
+    let (dst_fs, dst_rel) = ROOT_DIR.mounted_fs_for_path(&new_abs);
+    if src_rel.is_empty() || dst_rel.is_empty() {
+        return ax_err!(PermissionDenied);
     }
-    parent_node_of(None, old).rename(old, new)
+    if !Arc::ptr_eq(&src_fs, &dst_fs) {
+        return ax_err!(PermissionDenied);
+    }
+
+    if parent_node_of(None, &new_abs).lookup(&new_abs).is_ok() {
+        warn!("dst file already exist, now remove it");
+        let attr = lookup(None, &new_abs)?.get_attr()?;
+        if attr.is_dir() {
+            remove_dir(None, &new_abs)?;
+        } else {
+            remove_file(None, &new_abs)?;
+        }
+    }
+
+    src_fs.root_dir().rename(src_rel, dst_rel)
 }

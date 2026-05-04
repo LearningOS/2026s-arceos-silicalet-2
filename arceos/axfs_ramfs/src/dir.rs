@@ -67,6 +67,31 @@ impl DirNode {
         children.remove(name);
         Ok(())
     }
+
+    fn rename_node(&self, src_name: &str, dst_name: &str) -> VfsResult {
+        if src_name == dst_name {
+            return if self.exist(src_name) {
+                Ok(())
+            } else {
+                Err(VfsError::NotFound)
+            };
+        }
+
+        let mut children = self.children.write();
+        let src_node = children.remove(src_name).ok_or(VfsError::NotFound)?;
+
+        if let Some(dst_node) = children.get(dst_name) {
+            if let Some(dir) = dst_node.as_any().downcast_ref::<DirNode>() {
+                if !dir.children.read().is_empty() {
+                    children.insert(src_name.into(), src_node);
+                    return Err(VfsError::DirectoryNotEmpty);
+                }
+            }
+        }
+
+        children.insert(dst_name.into(), src_node);
+        Ok(())
+    }
 }
 
 impl VfsNodeOps for DirNode {
@@ -165,6 +190,40 @@ impl VfsNodeOps for DirNode {
         }
     }
 
+    fn rename(&self, src_path: &str, dst_path: &str) -> VfsResult {
+        log::debug!("rename at ramfs, src_path: {}, dst_path: {}", src_path, dst_path);
+
+        let src_path = axfs_vfs::path::canonicalize(src_path);
+        let dst_path = axfs_vfs::path::canonicalize(dst_path);
+        let (src_parent, src_name) = split_parent_path(&src_path);
+        let (dst_parent, dst_name) = split_parent_path(&dst_path);
+
+        if src_name.is_empty() || src_name == "." || src_name == ".." {
+            return Err(VfsError::InvalidInput);
+        }
+        if dst_name.is_empty() || dst_name == "." || dst_name == ".." {
+            return Err(VfsError::InvalidInput);
+        }
+        if src_parent != dst_parent {
+            return Err(VfsError::Unsupported);
+        }
+
+        if src_parent.is_empty() || src_parent == "/" {
+            self.rename_node(src_name, dst_name)
+        } else {
+            let parent = self
+                .this
+                .upgrade()
+                .ok_or(VfsError::NotFound)?
+                .lookup(src_parent)?;
+            let parent = parent
+                .as_any()
+                .downcast_ref::<DirNode>()
+                .ok_or(VfsError::NotADirectory)?;
+            parent.rename_node(src_name, dst_name)
+        }
+    }
+
     axfs_vfs::impl_vfs_dir_default! {}
 }
 
@@ -173,4 +232,17 @@ fn split_path(path: &str) -> (&str, Option<&str>) {
     trimmed_path.find('/').map_or((trimmed_path, None), |n| {
         (&trimmed_path[..n], Some(&trimmed_path[n + 1..]))
     })
+}
+
+fn split_parent_path(path: &str) -> (&str, &str) {
+    let path = path.trim_end_matches('/');
+    if let Some((parent, name)) = path.rsplit_once('/') {
+        if parent.is_empty() {
+            ("/", name)
+        } else {
+            (parent, name)
+        }
+    } else {
+        ("", path)
+    }
 }

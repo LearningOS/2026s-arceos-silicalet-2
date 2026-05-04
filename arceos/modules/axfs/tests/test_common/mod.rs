@@ -242,9 +242,12 @@ fn test_devfs_ramfs() -> Result<()> {
     assert_eq!(fs::read_dir("tmp").unwrap().count(), 1);
     assert_eq!(fs::write(".///tmp///dir//.///test.txt", "test"), Ok(()));
     assert_eq!(fs::read("tmp//././/dir//.///test.txt"), Ok("test".into()));
+    assert_eq!(fs::rename("/tmp/dir/test.txt", "/tmp/dir/test2.txt"), Ok(()));
+    assert_err!(fs::read("tmp/dir/test.txt"), NotFound);
+    assert_eq!(fs::read("/tmp/dir/test2.txt"), Ok("test".into()));
     // assert_err!(fs::remove_dir("dev/../tmp//dir"), DirectoryNotEmpty); // TODO
     assert_err!(fs::remove_dir("/tmp/dir/../dir"), DirectoryNotEmpty);
-    assert_eq!(fs::remove_file("./tmp//dir//test.txt"), Ok(()));
+    assert_eq!(fs::remove_file("./tmp//dir//test2.txt"), Ok(()));
     assert_eq!(fs::remove_dir("tmp/dir/.././dir///"), Ok(()));
     assert_eq!(fs::read_dir("tmp").unwrap().count(), 0);
 

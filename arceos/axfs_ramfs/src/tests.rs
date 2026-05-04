@@ -88,6 +88,35 @@ fn test_get_parent(devfs: &RamFileSystem) -> VfsResult {
     Ok(())
 }
 
+fn test_rename(devfs: &RamFileSystem) -> VfsResult {
+    let root = devfs.root_dir();
+
+    root.create("rename_src", VfsNodeType::File)?;
+    let src = root.lookup("rename_src")?;
+    assert_eq!(src.write_at(0, b"hello")?, 5);
+
+    assert_eq!(root.rename("rename_src", "rename_dst"), Ok(()));
+    assert_eq!(root.lookup("rename_src").err(), Some(VfsError::NotFound));
+
+    let dst = root.lookup("rename_dst")?;
+    let mut buf = [0u8; 8];
+    let n = dst.read_at(0, &mut buf)?;
+    assert_eq!(&buf[..n], b"hello");
+
+    root.create("dir_a", VfsNodeType::Dir)?;
+    root.create("dir_b", VfsNodeType::Dir)?;
+    assert_eq!(root.rename("dir_a", "dir_b"), Ok(()));
+    assert!(root.lookup("dir_a").is_err());
+    assert!(root.lookup("dir_b").is_ok());
+
+    assert_eq!(
+        root.rename("rename_dst", "subdir/rename_dst").err(),
+        Some(VfsError::Unsupported)
+    );
+
+    Ok(())
+}
+
 #[test]
 fn test_ramfs() {
     // .
@@ -117,6 +146,7 @@ fn test_ramfs() {
 
     test_ramfs_ops(&ramfs).unwrap();
     test_get_parent(&ramfs).unwrap();
+    test_rename(&ramfs).unwrap();
 
     let root = ramfs.root_dir();
     assert_eq!(root.remove("f1"), Ok(()));
