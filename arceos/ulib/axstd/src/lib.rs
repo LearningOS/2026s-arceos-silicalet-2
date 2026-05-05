@@ -55,7 +55,7 @@ extern crate alloc;
 
 #[cfg(feature = "alloc")]
 #[doc(no_inline)]
-pub use alloc::{boxed, collections, format, string, vec};
+pub use alloc::{boxed, format, string, vec};
 
 #[doc(no_inline)]
 pub use core::{arch, cell, cmp, hint, marker, mem, ops, ptr, slice, str};
@@ -63,6 +63,10 @@ pub use core::{arch, cell, cmp, hint, marker, mem, ops, ptr, slice, str};
 #[macro_use]
 mod macros;
 
+#[cfg(feature = "alloc")]
+// `alloc::collections` does not provide `HashMap`/`HashSet`, so keep a local
+// compatibility module here instead of re-exporting it directly.
+pub mod collections;
 pub mod env;
 pub mod io;
 pub mod os;
