@@ -27,3 +27,4 @@ Cargo.lock
 arceos/.codex
 .codex
 alt_alloc_implementation.md
+sys_map_impl.md
